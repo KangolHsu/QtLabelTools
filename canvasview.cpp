@@ -16,3 +16,13 @@ void CanvasView::wheelEvent(QWheelEvent *event)
     qreal scaleFactor = (event->angleDelta().y() > 0) ? 1.15 : 1.0 / 1.15;
     scale(scaleFactor, scaleFactor);
 }
+
+void CanvasView::mouseMoveEvent(QMouseEvent *event)
+{
+    QGraphicsView::mouseMoveEvent(event);
+    if (scene()) {
+        scene()->update();
+    }
+
+    
+}

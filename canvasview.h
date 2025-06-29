@@ -15,6 +15,7 @@ public:
 
 protected:
     void wheelEvent(QWheelEvent *event) override;
+    void mouseMoveEvent(QMouseEvent *event) override;
 };
 
 #endif // CANVASVIEW_H

@@ -33,6 +33,8 @@ set(PROJECT_SOURCES
     canvasscene.h
     polygonitem.cpp
     polygonitem.h
+    rectangleitem.cpp
+    rectangleitem.h
 )
 
 # --- Build Target ---

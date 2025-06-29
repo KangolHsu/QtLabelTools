@@ -56,6 +56,7 @@
    <addaction name="actionNext_Image"/>
    <addaction name="separator"/>
    <addaction name="actionCreate_Polygon"/>
+   <addaction name="actionCreate_Rectangle"/>
   </widget>
   <widget class="QDockWidget" name="dockWidgetFiles">
    <property name="windowTitle">
@@ -173,6 +174,17 @@
    </property>
    <property name="shortcut">
     <string>Ctrl+N</string>
+   </property>
+  </action>
+  <action name="actionCreate_Rectangle">
+   <property name="checkable">
+    <bool>true</bool>
+   </property>
+   <property name="text">
+    <string>创建矩形</string>
+   </property>
+   <property name="shortcut">
+    <string>Ctrl+R</string>
    </property>
   </action>
  </widget>

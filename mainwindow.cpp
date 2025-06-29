@@ -7,6 +7,7 @@
 #include "canvasview.h"
 #include "canvasscene.h"
 #include "polygonitem.h"
+#include "rectangleitem.h"
 
 #include <QFileDialog>
 #include <QDir>
@@ -18,15 +19,21 @@
 #include <QFileInfo>
 #include <QInputDialog>
 
+
 MainWindow::MainWindow(QWidget *parent)
     : QMainWindow(parent)
     , ui(new Ui::MainWindow)
 {
     ui->setupUi(this);
 
+    // Detach the old graphicsView from the layout and delete it
+    ui->horizontalLayout->removeWidget(ui->graphicsView);
+    ui->graphicsView->setParent(nullptr);
+    delete ui->graphicsView;
+
+    // Create and add the new CanvasView
     view = new CanvasView(this);
-    delete ui->horizontalLayout->replaceWidget(ui->graphicsView, view);
-    delete ui->graphicsView; 
+    ui->horizontalLayout->addWidget(view);
     
     scene = new CanvasScene(this);
     view->setScene(scene);
@@ -34,7 +41,11 @@ MainWindow::MainWindow(QWidget *parent)
     populateLabels();
     
     connect(scene, &CanvasScene::polygonFinished, this, &MainWindow::handlePolygonFinished);
+    connect(scene, &CanvasScene::rectangleFinished, this, &MainWindow::handleRectangleFinished);
     connect(scene, &QGraphicsScene::selectionChanged, this, &MainWindow::handleSelectionChanged);
+
+    ui->shapeListWidget->setContextMenuPolicy(Qt::CustomContextMenu);
+    connect(ui->shapeListWidget, &QListWidget::customContextMenuRequested, this, &MainWindow::on_shapeListWidget_customContextMenuRequested);
 }
 
 MainWindow::~MainWindow()
@@ -166,6 +177,19 @@ void MainWindow::saveAnnotations(const QString& imagePath)
             }
             shapeObj["points"] = pointsArray;
             shapesArray.append(shapeObj);
+        } else if (auto rectangleItem = dynamic_cast<RectangleItem*>(item)) {
+            QJsonObject shapeObj;
+            shapeObj["label"] = rectangleItem->getLabel();
+            shapeObj["group_id"] = QJsonValue::Null;
+            shapeObj["shape_type"] = "rectangle";
+            shapeObj["flags"] = QJsonObject();
+
+            QJsonArray pointsArray;
+            QRectF rect = rectangleItem->rect();
+            pointsArray.append(QJsonArray{rect.left(), rect.top()});
+            pointsArray.append(QJsonArray{rect.right(), rect.bottom()});
+            shapeObj["points"] = pointsArray;
+            shapesArray.append(shapeObj);
         }
     }
     rootObj["shapes"] = shapesArray;
@@ -219,6 +243,16 @@ void MainWindow::loadAnnotations(const QString &jsonPath)
             polygonItem->setLabel(shapeObj["label"].toString());
             polygonItem->setFlags(QGraphicsItem::ItemIsSelectable | QGraphicsItem::ItemIsMovable | QGraphicsItem::ItemSendsGeometryChanges);
             scene->addItem(polygonItem);
+        } else if (shapeObj["shape_type"] == "rectangle") {
+            QJsonArray pointsArray = shapeObj["points"].toArray();
+            QPointF topLeft(pointsArray[0].toArray()[0].toDouble(), pointsArray[0].toArray()[1].toDouble());
+            QPointF bottomRight(pointsArray[1].toArray()[0].toDouble(), pointsArray[1].toArray()[1].toDouble());
+            QRectF rect(topLeft, bottomRight);
+
+            auto rectangleItem = new RectangleItem(rect);
+            rectangleItem->setLabel(shapeObj["label"].toString());
+            rectangleItem->setFlags(QGraphicsItem::ItemIsSelectable | QGraphicsItem::ItemIsMovable);
+            scene->addItem(rectangleItem);
         }
     }
     updateShapeList();
@@ -260,9 +294,30 @@ void MainWindow::on_actionCreate_Polygon_triggered(bool checked)
     }
 }
 
+void MainWindow::on_actionCreate_Rectangle_triggered(bool checked)
+{
+    if(checked) {
+        if(ui->labelListWidget->currentItem()){
+            scene->setCurrentLabel(ui->labelListWidget->currentItem()->text());
+            scene->setMode(CanvasScene::DrawRectangle);
+            statusBar()->showMessage("模式：绘制矩形。按住并拖动鼠标，双击完成。", 0);
+        } else {
+            statusBar()->showMessage("请先在右侧选择一个标签！", 3000);
+            ui->actionCreate_Rectangle->setChecked(false);
+        }
+    } else {
+        scene->setMode(CanvasScene::NoMode);
+        statusBar()->clearMessage();
+    }
+}
+
 void MainWindow::handlePolygonFinished(PolygonItem* item)
 {
-    ui->actionCreate_Polygon->setChecked(false);
+    updateShapeList();
+}
+
+void MainWindow::handleRectangleFinished(RectangleItem* item)
+{
     updateShapeList();
 }
 
@@ -290,8 +345,11 @@ void MainWindow::changeSelectedShapeLabel()
     QList<QGraphicsItem*> selectedItems = scene->selectedItems();
     if(selectedItems.size() != 1) return;
 
-    PolygonItem* item = dynamic_cast<PolygonItem*>(selectedItems.first());
-    if(!item) return;
+    QGraphicsItem* item = selectedItems.first();
+    PolygonItem* polygonItem = dynamic_cast<PolygonItem*>(item);
+    RectangleItem* rectangleItem = dynamic_cast<RectangleItem*>(item);
+
+    if(!polygonItem && !rectangleItem) return;
 
     QStringList labels;
     for(int i=0; i<ui->labelListWidget->count(); ++i){
@@ -302,9 +360,35 @@ void MainWindow::changeSelectedShapeLabel()
     QString newLabel = QInputDialog::getItem(this, "修改标签", "选择新标签:", labels, 0, false, &ok);
 
     if(ok && !newLabel.isEmpty()){
-        item->setLabel(newLabel);
-        item->update(); 
+        if (polygonItem) {
+            polygonItem->setLabel(newLabel);
+        } else if (rectangleItem) {
+            rectangleItem->setLabel(newLabel);
+        }
+        item->update();
         updateShapeList();
+    }
+}
+
+void MainWindow::on_shapeListWidget_customContextMenuRequested(const QPoint &pos)
+{
+    QListWidgetItem* item = ui->shapeListWidget->itemAt(pos);
+    if (item) {
+        QMenu menu(this);
+        QAction *editAction = menu.addAction("编辑标签");
+        QAction *deleteAction = menu.addAction("删除");
+        QAction *selectedAction = menu.exec(ui->shapeListWidget->mapToGlobal(pos));
+        if (selectedAction == deleteAction) {
+            QGraphicsItem* graphicsItem = item->data(Qt::UserRole).value<QGraphicsItem*>();
+            scene->removeItem(graphicsItem);
+            delete graphicsItem;
+            updateShapeList();
+        } else if (selectedAction == editAction) {
+            QGraphicsItem* graphicsItem = item->data(Qt::UserRole).value<QGraphicsItem*>();
+            scene->clearSelection();
+            graphicsItem->setSelected(true);
+            changeSelectedShapeLabel();
+        }
     }
 }
 
@@ -315,12 +399,22 @@ void MainWindow::updateShapeList()
     for (QGraphicsItem *item : scene->items()) {
         if (auto polygonItem = dynamic_cast<PolygonItem*>(item)) {
              QListWidgetItem* listItem = new QListWidgetItem(
-                QString("%1 (%2 points)").arg(polygonItem->getLabel()).arg(polygonItem->polygon().size()),
+                QString("%1 (Polygon)").arg(polygonItem->getLabel()),
                 ui->shapeListWidget
             );
             listItem->setData(Qt::UserRole, QVariant::fromValue<QGraphicsItem*>(polygonItem));
             
             if(polygonItem->isSelected()){
+                listItem->setSelected(true);
+            }
+        } else if (auto rectangleItem = dynamic_cast<RectangleItem*>(item)) {
+            QListWidgetItem* listItem = new QListWidgetItem(
+                QString("%1 (Rectangle)").arg(rectangleItem->getLabel()),
+                ui->shapeListWidget
+            );
+            listItem->setData(Qt::UserRole, QVariant::fromValue<QGraphicsItem*>(rectangleItem));
+            
+            if(rectangleItem->isSelected()){
                 listItem->setSelected(true);
             }
         }

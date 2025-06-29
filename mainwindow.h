@@ -14,6 +14,7 @@ QT_END_NAMESPACE
 
 class CanvasScene;
 class PolygonItem;
+class RectangleItem;
 class CanvasView;
 
 class MainWindow : public QMainWindow
@@ -40,14 +41,17 @@ private slots:
     void on_actionNext_Image_triggered();
     void on_actionPrev_Image_triggered();
     void on_actionCreate_Polygon_triggered(bool checked);
+    void on_actionCreate_Rectangle_triggered(bool checked);
     
     // 自定义槽函数
     void handlePolygonFinished(PolygonItem* item);
+    void handleRectangleFinished(RectangleItem* item);
     void handleSelectionChanged();
 
     // 新增的槽函数，用于处理标签的增删
     void on_addLabelButton_clicked();
     void on_deleteLabelButton_clicked();
+    void on_shapeListWidget_customContextMenuRequested(const QPoint &pos);
 
 
 private:

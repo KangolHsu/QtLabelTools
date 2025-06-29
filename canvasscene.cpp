@@ -1,13 +1,14 @@
-
 /* *************************************************************** */
 /* canvasscene.cpp                         */
 /* *************************************************************** */
 #include "canvasscene.h"
 #include "polygonitem.h"
+#include "rectangleitem.h"
 #include "mainwindow.h"
 #include <QGraphicsLineItem>
 #include <QPen>
 #include <QMenu>
+#include <QKeyEvent>
 
 CanvasScene::CanvasScene(QObject *parent) : QGraphicsScene(parent) {}
 
@@ -25,6 +26,11 @@ void CanvasScene::setMode(Mode mode)
             delete rubberBandLine;
             rubberBandLine = nullptr;
         }
+        if (currentItem) {
+            removeItem(currentItem);
+            delete currentItem;
+            currentItem = nullptr;
+        }
         currentPolygon.clear();
     }
 }
@@ -36,7 +42,12 @@ void CanvasScene::setCurrentLabel(const QString &label)
 
 void CanvasScene::mousePressEvent(QGraphicsSceneMouseEvent *event)
 {
-    if (currentMode == DrawPolygon && event->button() == Qt::LeftButton) {
+    if (event->button() != Qt::LeftButton) {
+        QGraphicsScene::mousePressEvent(event);
+        return;
+    }
+
+    if (currentMode == DrawPolygon) {
         QPointF point = event->scenePos();
         currentPolygon << point;
 
@@ -50,17 +61,44 @@ void CanvasScene::mousePressEvent(QGraphicsSceneMouseEvent *event)
             rubberBandLine = addLine(QLineF(point, point), QPen(Qt::DashLine));
         }
         rubberBandLine->setLine(QLineF(point, point));
+    } else if (currentMode == DrawRectangle) {
+        startPoint = event->scenePos();
+        currentItem = new RectangleItem(QRectF(startPoint, startPoint));
+        addItem(currentItem);
+    } else {
+        QGraphicsScene::mousePressEvent(event);
     }
-    // 将事件传递给场景中的item，以便它们能处理自己的鼠标事件（如拖拽顶点）
-    QGraphicsScene::mousePressEvent(event);
 }
 
 void CanvasScene::mouseMoveEvent(QGraphicsSceneMouseEvent *event)
 {
     if (currentMode == DrawPolygon && !currentPolygon.isEmpty() && rubberBandLine) {
         rubberBandLine->setLine(QLineF(currentPolygon.last(), event->scenePos()));
+    } else if (currentMode == DrawRectangle && currentItem) {
+        auto rectItem = static_cast<RectangleItem*>(currentItem);
+        QRectF newRect(startPoint, event->scenePos());
+        rectItem->setRect(newRect.normalized());
+    } else {
+        QGraphicsScene::mouseMoveEvent(event);
     }
-    QGraphicsScene::mouseMoveEvent(event);
+}
+
+void CanvasScene::mouseReleaseEvent(QGraphicsSceneMouseEvent *event)
+{
+    if (event->button() != Qt::LeftButton) {
+        QGraphicsScene::mouseReleaseEvent(event);
+        return;
+    }
+
+    if (currentMode == DrawRectangle && currentItem) {
+        auto rectItem = static_cast<RectangleItem*>(currentItem);
+        rectItem->setLabel(currentLabel);
+        rectItem->setFlags(QGraphicsItem::ItemIsSelectable | QGraphicsItem::ItemIsMovable);
+        emit rectangleFinished(rectItem);
+        currentItem = nullptr; // The item is now permanent
+    } else {
+        QGraphicsScene::mouseReleaseEvent(event);
+    }
 }
 
 void CanvasScene::mouseDoubleClickEvent(QGraphicsSceneMouseEvent *event)
@@ -83,31 +121,41 @@ void CanvasScene::mouseDoubleClickEvent(QGraphicsSceneMouseEvent *event)
         addItem(finalPolygonItem);
         
         currentPolygon.clear();
-        setMode(NoMode);
         emit polygonFinished(finalPolygonItem);
     }
     QGraphicsScene::mouseDoubleClickEvent(event);
 }
 
+void CanvasScene::keyPressEvent(QKeyEvent *event)
+{
+    if (event->key() == Qt::Key_Escape) {
+        if (currentMode == DrawRectangle && currentItem) {
+            removeItem(currentItem);
+            delete currentItem;
+            currentItem = nullptr;
+            setMode(NoMode);
+        } else if (currentMode == DrawPolygon) {
+            // Handle polygon cancellation if needed
+            setMode(NoMode);
+        }
+    }
+    QGraphicsScene::keyPressEvent(event);
+}
+
+
 void CanvasScene::contextMenuEvent(QGraphicsSceneContextMenuEvent *event)
 {
-    // 检查鼠标下是否有我们自定义的多边形项
     QGraphicsItem* item = itemAt(event->scenePos(), QTransform());
-    PolygonItem* polygonItem = dynamic_cast<PolygonItem*>(item);
-
-    if (polygonItem) {
-        // 如果有，就创建一个右键菜单
+    if (item && (dynamic_cast<PolygonItem*>(item) || dynamic_cast<RectangleItem*>(item))) {
         clearSelection();
-        polygonItem->setSelected(true);
+        item->setSelected(true);
 
         QMenu menu;
         QAction *changeLabelAction = menu.addAction("修改标签");
         QAction *deleteAction = menu.addAction("删除标注");
 
-        // 执行菜单，并根据用户的选择执行相应的动作
         QAction *selectedAction = menu.exec(event->screenPos());
 
-        // 获取主窗口指针来调用槽函数
         MainWindow* mw = qobject_cast<MainWindow*>(parent());
 
         if (mw) {
